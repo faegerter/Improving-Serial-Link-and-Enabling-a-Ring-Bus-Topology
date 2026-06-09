@@ -14,7 +14,7 @@ SLINK_ROOT ?= $(shell $(BENDER) path serial_link)
 
 SLINK_LOG2_MAX_NODE_IDS          	?= 4
 SLINK_NUM_CHANNELS               	?= 1
-SLINK_NUM_LANES                  	?= 8
+SLINK_NUM_LANES                  	?= 10
 SLINK_EN_DDR                     	?= 1
 SLINK_EN_BYPASS                  	?= 1
 SLINK_LOG2_MAX_CLK_DIV           	?= 10

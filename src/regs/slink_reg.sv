@@ -272,7 +272,7 @@ module slink_reg #(
         } raw_mode_in_ch_sel;
         struct {
             struct {
-                logic [15:0] next;
+                logic [19:0] next;
                 logic load_next;
             } raw_mode_out_data_fifo;
         } raw_mode_out_data_fifo;
@@ -337,7 +337,7 @@ module slink_reg #(
         } raw_mode_in_ch_sel;
         struct {
             struct {
-                logic [15:0] value;
+                logic [19:0] value;
             } raw_mode_out_data_fifo;
         } raw_mode_out_data_fifo;
         struct {
@@ -491,12 +491,12 @@ module slink_reg #(
     assign hwif_out.raw_mode_in_ch_sel.raw_mode_in_ch_sel.value = field_storage.raw_mode_in_ch_sel.raw_mode_in_ch_sel.value;
     // Field: slink_reg.raw_mode_out_data_fifo.raw_mode_out_data_fifo
     always_comb begin
-        automatic logic [15:0] next_c;
+        automatic logic [19:0] next_c;
         automatic logic load_next_c;
         next_c = field_storage.raw_mode_out_data_fifo.raw_mode_out_data_fifo.value;
         load_next_c = '0;
         if(decoded_reg_strb.raw_mode_out_data_fifo && decoded_req_is_wr) begin // SW write
-            next_c = (field_storage.raw_mode_out_data_fifo.raw_mode_out_data_fifo.value & ~decoded_wr_biten[15:0]) | (decoded_wr_data[15:0] & decoded_wr_biten[15:0]);
+            next_c = (field_storage.raw_mode_out_data_fifo.raw_mode_out_data_fifo.value & ~decoded_wr_biten[19:0]) | (decoded_wr_data[19:0] & decoded_wr_biten[19:0]);
             load_next_c = '1;
         end
         field_combo.raw_mode_out_data_fifo.raw_mode_out_data_fifo.next = next_c;
@@ -504,7 +504,7 @@ module slink_reg #(
     end
     always_ff @(posedge clk or negedge arst_n) begin
         if(~arst_n) begin
-            field_storage.raw_mode_out_data_fifo.raw_mode_out_data_fifo.value <= 16'h0;
+            field_storage.raw_mode_out_data_fifo.raw_mode_out_data_fifo.value <= 20'h0;
         end else begin
             if(field_combo.raw_mode_out_data_fifo.raw_mode_out_data_fifo.load_next) begin
                 field_storage.raw_mode_out_data_fifo.raw_mode_out_data_fifo.value <= field_combo.raw_mode_out_data_fifo.raw_mode_out_data_fifo.next;
@@ -512,7 +512,7 @@ module slink_reg #(
         end
     end
     assign hwif_out.raw_mode_out_data_fifo.raw_mode_out_data_fifo.value = field_storage.raw_mode_out_data_fifo.raw_mode_out_data_fifo.value;
-    assign hwif_out.raw_mode_out_data_fifo.raw_mode_out_data_fifo.swmod = decoded_reg_strb.raw_mode_out_data_fifo && decoded_req_is_wr && |(decoded_wr_biten[15:0]);
+    assign hwif_out.raw_mode_out_data_fifo.raw_mode_out_data_fifo.swmod = decoded_reg_strb.raw_mode_out_data_fifo && decoded_req_is_wr && |(decoded_wr_biten[19:0]);
     // External register: slink_reg.raw_mode_out_data_fifo_ctrl
     assign hwif_out.raw_mode_out_data_fifo_ctrl.req = decoded_reg_strb.raw_mode_out_data_fifo_ctrl;
     assign hwif_out.raw_mode_out_data_fifo_ctrl.req_is_wr = decoded_req_is_wr;
