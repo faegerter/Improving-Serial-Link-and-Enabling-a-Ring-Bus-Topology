@@ -20,4 +20,3 @@ vc_hdrs.h
 scripts/compile_vcs.log
 .dvt
 private_scripts
-.generated
