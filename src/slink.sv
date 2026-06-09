@@ -56,7 +56,7 @@ module slink
 );
 
     localparam int unsigned NumBitsPerCycle  = NumLanes * (1 + EnDdr);
-    localparam int unsigned RawModeFifoDepth = 2**Log2RawModeTXFifoDepth;
+    localparam int unsigned RawModeFifoDepth = 4;
     localparam int unsigned MaxClkDiv        = 2**Log2MaxClkDiv;
 
     // Determine the largest sized OBI channel
