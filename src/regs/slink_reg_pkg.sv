@@ -114,6 +114,14 @@ package slink_reg_pkg;
     } slink_reg_NumLanes_a__node_id__out_t;
 
     typedef struct {
+        logic [3:0] value;
+    } slink_reg_NumLanes_a__global_addr__global_addr__out_t;
+
+    typedef struct {
+        slink_reg_NumLanes_a__global_addr__global_addr__out_t global_addr;
+    } slink_reg_NumLanes_a__global_addr__out_t;
+
+    typedef struct {
         logic value;
     } slink_reg_NumLanes_a__raw_mode_en__raw_mode_en__out_t;
 
@@ -282,6 +290,7 @@ package slink_reg_pkg;
     typedef struct {
         slink_reg_NumLanes_a__ctrl__out_t ctrl;
         slink_reg_NumLanes_a__node_id__out_t node_id;
+        slink_reg_NumLanes_a__global_addr__out_t global_addr;
         slink_reg_NumLanes_a__raw_mode_en__out_t raw_mode_en;
         slink_reg_NumLanes_a__raw_mode_in_data__external__out_t raw_mode_in_data;
         slink_reg_NumLanes_a__raw_mode_in_ch_sel__out_t raw_mode_in_ch_sel;

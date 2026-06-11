@@ -33,6 +33,7 @@ module slink_prot_layer #(
     input  logic      clk_i,
     input  logic      rst_ni,
     input  logic[NodeIdWidth-1:0] node_id_i,
+    input  logic[NodeIdWidth-1:0] global_addr_i,
     // TODO Consider renaming in/out to sbr/mgr... Maybe? Not sure...
     input  obi_req_sbr_t  obi_in_req_i,
     output obi_rsp_sbr_t  obi_in_rsp_o,
@@ -106,7 +107,7 @@ module slink_prot_layer #(
     endfunction
 
     function automatic obi_addr_t get_local_addr(obi_addr_t addr);
-        return {{NodeIdWidth{1'b0}}, addr[slink_obi_cfg.AddrWidth-NodeIdWidth-1 : 0]};
+        return {{NodeIdWidth{1'b0}}, addr[slink_obi_cfg.AddrWidth-1 : 0]};
     endfunction
 
     function automatic payload_t make_r_payload(
@@ -270,11 +271,11 @@ module slink_prot_layer #(
     assign r_chan_read_out.err   = obi_out_rsp_i.r.err;
     assign r_chan_read_out.rdata = obi_out_rsp_i.r.rdata;
 
-    assign a_chan_write_out.addr  = obi_in_req_i.a.addr;
+    assign a_chan_write_out.addr  = obi_in_req_i.a.addr[slink_obi_cfg.AddrWidth-NodeIdWidth-1 : 0];
     assign a_chan_write_out.aid   = rsp_reorder_tail_idx;
     assign a_chan_write_out.wdata = obi_in_req_i.a.wdata;
 
-    assign a_chan_read_out.addr = obi_in_req_i.a.addr;
+    assign a_chan_read_out.addr = obi_in_req_i.a.addr[slink_obi_cfg.AddrWidth-NodeIdWidth-1 : 0];
     assign a_chan_read_out.aid  = rsp_reorder_tail_idx;
 
     //////////////////////////////////////

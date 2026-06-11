@@ -54,13 +54,14 @@ module tb_obi_slink;
   localparam int unsigned AddrIdxBits = $clog2(MemDepth);
   localparam int unsigned MemByteSize = MemDepth * (32 / 8);  // 0x400
 
-  localparam int unsigned ObiIdWidth    = 3;
-  localparam int unsigned ObiAddrWidth  = 32;
-  localparam int unsigned ObiDataWidth  = 32;
-  localparam int unsigned RegAddrWidth  = 32;
-  localparam int unsigned RegDataWidth  = 32;
-  localparam bit          UseByteEnable = 1;
-  localparam bit          UseOptional   = 0;
+  localparam int unsigned ObiIdWidth     = 3;
+  localparam int unsigned ObiNodeIdWidth = 4;
+  localparam int unsigned ObiAddrWidth   = 32;
+  localparam int unsigned ObiDataWidth   = 32;
+  localparam int unsigned RegAddrWidth   = 32;
+  localparam int unsigned RegDataWidth   = 32;
+  localparam bit          UseByteEnable  = 1;
+  localparam bit          UseOptional    = 0;
 
   localparam int unsigned RecvFifoPayloadDepth = 8;
   localparam int unsigned TxFifoDepth    = 3;
@@ -70,7 +71,7 @@ module tb_obi_slink;
   localparam obi_cfg_t ObiCfg = obi_default_cfg(
       ObiAddrWidth, ObiDataWidth, ObiIdWidth, ObiMinimalOptionalConfig);
   localparam slink_obi_cfg_t SlinkObiCfg = slink_obi_cfg(
-      ObiAddrWidth, ObiDataWidth, ObiDataWidth, ObiIdWidth, UseByteEnable, UseOptional);
+      ObiAddrWidth, ObiDataWidth, ObiDataWidth, ObiIdWidth, ObiNodeIdWidth, UseByteEnable, UseOptional);
 
   `OBI_TYPEDEF_DEFAULT_ALL(obi, ObiCfg)
   `SLINK_OBI_TYPEDEF_DEFAULT(slink_obi, SlinkObiCfg)

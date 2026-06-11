@@ -155,18 +155,19 @@ module slink
         .slink_obi_cfg       ( slink_obi_cfg       ),
         .payload_t           ( payload_t           )
     ) i_serial_link_protocol (
-        .clk_i          ( clk_i                             ),
-        .rst_ni         ( rst_ni                            ),
-        .node_id_i      ( reg2hw.node_id.node_id.value      ),
-        .obi_in_req_i   ( obi_in_req_i                      ),
-        .obi_in_rsp_o   ( obi_in_rsp_o                      ),
-        .obi_out_req_o  ( obi_out_req_o                     ),
-        .obi_out_rsp_i  ( obi_out_rsp_i                     ),
-        .axis_in_req_i  ( axis_in_req                       ),
-        .axis_in_rsp_o  ( axis_in_rsp                       ),
-        .axis_out_req_o ( axis_out_req                      ),
-        .axis_out_rsp_i ( axis_out_rsp                      ),
-        .error_looped_rsp_o ( hw2reg.error.looped_rsp.next  )
+        .clk_i          ( clk_i                                     ),
+        .rst_ni         ( rst_ni                                    ),
+        .node_id_i      ( reg2hw.node_id.node_id.value              ),
+        .global_addr_i  ( reg2hw.global_addr.global_addr.value      ),
+        .obi_in_req_i   ( obi_in_req_i                              ),
+        .obi_in_rsp_o   ( obi_in_rsp_o                              ),
+        .obi_out_req_o  ( obi_out_req_o                             ),
+        .obi_out_rsp_i  ( obi_out_rsp_i                             ),
+        .axis_in_req_i  ( axis_in_req                               ),
+        .axis_in_rsp_o  ( axis_in_rsp                               ),
+        .axis_out_req_o ( axis_out_req                              ),
+        .axis_out_rsp_i ( axis_out_rsp                              ),
+        .error_looped_rsp_o ( hw2reg.error.looped_rsp.next          )
     );
 
     /////////////////////////

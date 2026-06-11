@@ -55,6 +55,16 @@ addrmap slink_reg #(
             desc = "ID of the slink IP in the ring";
         } node_id[Log2MaxNodeIds-1:0] = 0x0;
     };
+    
+    reg global_addr {
+        default sw = rw;
+        default hw = r;
+        desc = "Defines the global address space";
+        field {
+            name = "global_addr";
+            desc = "ID of the global address in the ring";
+        } global_addr[Log2MaxNodeIds-1:0] = 0xF;
+    };
 
     reg tx_phy_clk_div {
         default sw = rw;
@@ -253,13 +263,14 @@ addrmap slink_reg #(
              ctrl                        ctrl @0x0;
              error                       error @0x4;
              node_id                     node_id @0x8;
-             raw_mode_en                 raw_mode_en @0xc;
-    external raw_mode_in_data            raw_mode_in_data @0x10;
-             raw_mode_in_ch_sel          raw_mode_in_ch_sel @0x14;
-             raw_mode_out_data_fifo      raw_mode_out_data_fifo @0x18;
-    external raw_mode_out_data_fifo_ctrl raw_mode_out_data_fifo_ctrl @0x1c;
-             raw_mode_out_en             raw_mode_out_en @0x20;
-    external flow_control_fifo_clear     flow_control_fifo_clear @0x24;
+             global_addr                 global_addr @0xc;
+             raw_mode_en                 raw_mode_en @0x10;
+    external raw_mode_in_data            raw_mode_in_data @0x14;
+             raw_mode_in_ch_sel          raw_mode_in_ch_sel @0x18;
+             raw_mode_out_data_fifo      raw_mode_out_data_fifo @0x1c;
+    external raw_mode_out_data_fifo_ctrl raw_mode_out_data_fifo_ctrl @0x20;
+             raw_mode_out_en             raw_mode_out_en @0x24;
+    external flow_control_fifo_clear     flow_control_fifo_clear @0x28;
     external raw_mode_in_data_valid      raw_mode_in_data_valid[NumChannels] @0x100;
              raw_mode_out_ch_mask        raw_mode_out_ch_mask[NumChannels] @0x200;
              tx_phy_clk_div              tx_phy_clk_div[NumChannels] @0x300;
