@@ -15,21 +15,25 @@ package slink_pkg;
     TagWriteGlobal   = 3'd4
   } tag_e;
 
-  typedef enum logic [2:0]  {
-    RxNone      = 3'd0,
-    RxTransit   = 3'd1,
-    RxIncomingA = 3'd2,
-    RxIncomingR = 3'd3,
-    RxLoopA     = 3'd4,
-    RxLoopR     = 3'd5,
-    RxError     = 3'd6
+  typedef enum logic [3:0]  {
+    RxNone           = 4'd0,
+    RxTransit        = 4'd1,
+    RxIncomingA      = 4'd2,
+    RxIncomingR      = 4'd3,
+    RxLoopA          = 4'd4,
+    RxLoopR          = 4'd5,
+    RxError          = 4'd6,
+    RxGlobalLoop     = 4'd7,
+    RxIncomingGlobal = 4'd8
   } rx_type_e;
 
-  typedef enum logic [1:0]  {
-    TxNone      = 2'd0,
-    TxTransit   = 2'd1,
-    TxOutgoingA = 2'd2,
-    TxOutgoingR = 2'd3
+  typedef enum logic [2:0]  {
+    TxNone           = 3'd0,
+    TxTransit        = 3'd1,
+    TxOutgoingA      = 3'd2,
+    TxOutgoingR      = 3'd3,
+    TxOutgoingGlobal = 3'd4,
+    TxForwardGlobal  = 3'd5
   } tx_type_e;
 
   function automatic int find_max_channel(input int channel[4]);

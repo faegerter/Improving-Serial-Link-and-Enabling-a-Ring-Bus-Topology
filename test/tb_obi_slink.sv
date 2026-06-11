@@ -47,8 +47,17 @@ module tb_obi_slink;
   // ================================================================
   //  Parameters
   // ================================================================
-  localparam int unsigned NumNodes     = 2**Log2MaxNodeIds;
+  // addr[31:28] selects the destination node. The MSB value 0xF is reserved as the
+  // global-broadcast address (see slink global_addr register, resets to 4'hF), so the
+  // usable node IDs are 0..0xE -> at most 2**Log2MaxNodeIds - 1 = 15 nodes.
+  localparam int unsigned NumNodes     = 2**Log2MaxNodeIds - 1;
   localparam int unsigned TestDuration = 15;  // transactions per node per destination
+
+  // Global-broadcast test configuration.
+  localparam logic [3:0]  GlobalAddr         = 4'hF;                 // addr[31:28] sentinel
+  localparam int unsigned GlobalCount        = 2;                   // global writes per source
+  localparam int unsigned GlobalBase         = NumNodes * TestDuration;  // first global word
+  localparam int unsigned GlobalSettleCycles = 2000;                // ring drain margin before read-back
 
   localparam int unsigned MemDepth    = 256;
   localparam int unsigned AddrIdxBits = $clog2(MemDepth);
@@ -85,8 +94,10 @@ module tb_obi_slink;
   initial begin
     assert (NumNodes * TestDuration <= MemDepth)
       else $fatal(1, "MemDepth (%0d) too small for NumNodes*TestDuration (%0d)", MemDepth, NumNodes * TestDuration);
-    assert (NumNodes <= 16)
-      else $fatal(1, "NumNodes (%0d) > 16, addr[31:28] only holds 16 IDs", NumNodes);
+    assert (NumNodes <= 15)
+      else $fatal(1, "NumNodes (%0d) > 15: addr[31:28] holds 16 IDs but 0xF is reserved for global", NumNodes);
+    assert (GlobalBase + NumNodes * GlobalCount <= MemDepth)
+      else $fatal(1, "MemDepth (%0d) too small for global region end (%0d)", MemDepth, GlobalBase + NumNodes * GlobalCount);
   end
 
   // ================================================================
@@ -111,9 +122,10 @@ module tb_obi_slink;
   //  write_done : all pipelined writes committed
   //  read_done  : all pipelined reads verified — used by proc_main
   // ================================================================
-  logic [NumNodes-1:0] link_ready = '0;
-  logic [NumNodes-1:0] write_done = '0;
-  logic [NumNodes-1:0] read_done  = '0;
+  logic [NumNodes-1:0] link_ready     = '0;
+  logic [NumNodes-1:0] write_done     = '0;
+  logic [NumNodes-1:0] global_wr_done = '0;
+  logic [NumNodes-1:0] read_done      = '0;
 
   // ================================================================
   //  Physical signals
@@ -146,6 +158,11 @@ module tb_obi_slink;
   // ================================================================
   //  Module-level helper tasks
   // ================================================================
+
+  // Deterministic, per-(source, index) global broadcast payload.
+  function automatic data_t global_data(int unsigned src, int unsigned t);
+    return data_t'(32'hC0FFEE00) | (data_t'(src) << 8) | data_t'(t);
+  endfunction
 
   task automatic cfg_write(obi_driver_t drv, cfg_addr_t addr, cfg_data_t wdata);
     automatic cfg_data_t       rdata;
@@ -415,6 +432,120 @@ module tb_obi_slink;
             end
           end
         join
+
+        // ==========================================================
+        //  Phase 3: global broadcast write
+        //
+        //  A write to addr[31:28] == GlobalAddr (0xF) is broadcast to
+        //  every OTHER node and written into its local memory. The
+        //  originator receives an immediate, non-error response, does
+        //  NOT write its own memory, and the payload is discarded when
+        //  it loops back around the ring.
+        //
+        //  Each source owns GlobalCount distinct words so the broadcasts
+        //  never clobber one another:
+        //    gw(src,t)                  = GlobalBase + src*GlobalCount + t
+        //    expected_mem[n != src][gw] = global_data(src,t)
+        //    expected_mem[src][gw]      = 0   (originator excluded)
+        //
+        //  Because the response is local/early, broadcasts are still in
+        //  flight when it arrives, so the ring must drain before reading.
+        // ==========================================================
+        for (int t = 0; t < GlobalCount; t++) begin
+          automatic int unsigned gw = GlobalBase + src_node * GlobalCount + t;
+          for (int n = 0; n < NumNodes; n++)
+            if (n != src_node) expected_mem[n][gw] = global_data(src_node, t);
+          // expected_mem[src_node][gw] intentionally left at 0 (self-exclusion).
+        end
+
+        fork
+          begin : gw_sender
+            for (int t = 0; t < GlobalCount; t++) begin
+              automatic int unsigned gw = GlobalBase + src_node * GlobalCount + t;
+              mgr.send_a((cfg_addr_t'(GlobalAddr) << 28) | cfg_addr_t'(gw << 2),
+                         1'b1, 4'b1111, global_data(src_node, t), obi_id_t'(t[0]), '0);
+            end
+          end
+          begin : gw_collector
+            for (int t = 0; t < GlobalCount; t++) begin
+              automatic data_t           rdata;
+              automatic obi_id_t         rid;
+              automatic logic            err;
+              automatic obi_r_optional_t r_opt;
+              mgr.recv_r(rdata, rid, err, r_opt);
+              node_checks[i]++;
+              if (err) begin
+                $error("[GW Node %0d] t=%0d: unexpected err=1 on global write response", i, t);
+                local_errs++;
+              end
+            end
+          end
+        join
+
+        global_wr_done[i] = 1'b1;
+        wait (global_wr_done == '1);
+        repeat (GlobalSettleCycles) @(posedge clk[i]);  // let all broadcasts drain
+        $display("[Node %0d] Global writes committed, verifying broadcast.", i);
+
+        // Verify my broadcast landed in every OTHER node's memory.
+        fork
+          begin : gchk_sender
+            for (int n = 0; n < NumNodes; n++) begin
+              if (n == src_node) continue;  // cannot read own node (self read errors)
+              for (int t = 0; t < GlobalCount; t++) begin
+                automatic int unsigned gw = GlobalBase + src_node * GlobalCount + t;
+                mgr.send_a((cfg_addr_t'(n) << 28) | cfg_addr_t'(gw << 2),
+                           1'b0, 4'b1111, '0, obi_id_t'(t[0]), '0);
+              end
+            end
+          end
+          begin : gchk_collector
+            for (int n = 0; n < NumNodes; n++) begin
+              if (n == src_node) continue;
+              for (int t = 0; t < GlobalCount; t++) begin
+                automatic data_t           rdata;
+                automatic obi_id_t         rid;
+                automatic logic            err;
+                automatic obi_r_optional_t r_opt;
+                automatic int unsigned     gw = GlobalBase + src_node * GlobalCount + t;
+                mgr.recv_r(rdata, rid, err, r_opt);
+                node_checks[i]++;
+                if (err) begin
+                  $error("[GCHK Node %0d->%0d] t=%0d: unexpected err on global read-back", i, n, t);
+                  local_errs++;
+                end else if (rdata !== global_data(src_node, t)) begin
+                  $error("[GCHK Node %0d->%0d] t=%0d gw=%0d: GLOBAL MISMATCH got=0x%08X exp=0x%08X",
+                         i, n, t, gw, rdata, global_data(src_node, t));
+                  local_errs++;
+                end
+              end
+            end
+          end
+        join
+
+        // Self-exclusion: an originator must NOT write its own memory. Read source p's
+        // own broadcast cells from node p (p != i) and expect them to still be 0.
+        begin
+          automatic int unsigned p = (src_node + NumNodes - 1) % NumNodes;
+          for (int t = 0; t < GlobalCount; t++) begin
+            automatic int unsigned     gw = GlobalBase + p * GlobalCount + t;
+            automatic data_t           rdata;
+            automatic obi_id_t         rid;
+            automatic logic            err;
+            automatic obi_r_optional_t r_opt;
+            mgr.send_a((cfg_addr_t'(p) << 28) | cfg_addr_t'(gw << 2), 1'b0, 4'b1111, '0, '0, '0);
+            mgr.recv_r(rdata, rid, err, r_opt);
+            node_checks[i]++;
+            if (err) begin
+              $error("[GSELF Node %0d read node %0d] t=%0d: unexpected err", i, p, t);
+              local_errs++;
+            end else if (rdata !== '0) begin
+              $error("[GSELF Node %0d read node %0d] t=%0d gw=%0d: originator wrote its own memory! got=0x%08X exp=0",
+                     i, p, t, gw, rdata);
+              local_errs++;
+            end
+          end
+        end
 
         node_errors[i]  = local_errs;
         read_done[i]    = 1'b1;

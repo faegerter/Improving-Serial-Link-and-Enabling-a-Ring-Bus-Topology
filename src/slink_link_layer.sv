@@ -140,7 +140,7 @@ module slink_link_layer #(
     assign all_channels_valid = &data_in_valid_i;
     assign data_in_idle       = (recv_reg_index_q == '0);
     assign data_out_idle      = ~axis_in_req_i.tvalid;
-    assign different_node_id  = (incoming_node_id != node_id_i);
+    assign different_node_id  = (incoming_node_id != node_id_i) && (slink_pkg::tag_e'(data_in_flat[$bits(slink_pkg::tag_e)-1:0]) != slink_pkg::TagWriteGlobal);
 
 
     generate
@@ -328,6 +328,13 @@ module slink_link_layer #(
                                 recv_reg_in_valid[i] = 1'b1;
                             end
                         end
+                        slink_pkg::TagWriteGlobal: begin 
+                            recv_reg_payload_size_d = AChannelWritePayloadSplits;
+                            for (int i = AChannelWritePayloadSplits; i < PayloadSplits; i++) begin
+                                recv_reg_in_data[i] = '0;
+                                recv_reg_in_valid[i] = 1'b1;
+                            end
+                        end
                         slink_pkg::TagARead: begin 
                             recv_reg_payload_size_d = AChannelReadPayloadSplits; 
                             for (int i = AChannelReadPayloadSplits; i < PayloadSplits; i++) begin
@@ -435,10 +442,11 @@ module slink_link_layer #(
                 LinkSendIdle: begin
                     if (axis_in_req_i.tvalid) begin
                         unique case(slink_pkg::tag_e'(axis_in_req_i.t.data[1:0]))
-                            slink_pkg::TagAWrite:  link_out_payload_size_d = AChannelWritePayloadSplits * BandWidth;
-                            slink_pkg::TagARead:   link_out_payload_size_d = AChannelReadPayloadSplits  * BandWidth; 
-                            slink_pkg::TagRWrite:  link_out_payload_size_d = RChannelWritePayloadSplits * BandWidth;
-                            slink_pkg::TagRRead:   link_out_payload_size_d = RChannelReadPayloadSplits  * BandWidth; 
+                            slink_pkg::TagAWrite:      link_out_payload_size_d = AChannelWritePayloadSplits * BandWidth;
+                            slink_pkg::TagWriteGlobal: link_out_payload_size_d = AChannelWritePayloadSplits * BandWidth;
+                            slink_pkg::TagARead:       link_out_payload_size_d = AChannelReadPayloadSplits  * BandWidth; 
+                            slink_pkg::TagRWrite:      link_out_payload_size_d = RChannelWritePayloadSplits * BandWidth;
+                            slink_pkg::TagRRead:       link_out_payload_size_d = RChannelReadPayloadSplits  * BandWidth; 
                             default:    link_out_payload_size_d = 1;
                         endcase
                         link_out_index_d = NumChannels * NumLanes * (1 + EnDdr);

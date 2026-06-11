@@ -72,6 +72,9 @@ module slink_prot_layer #(
     typedef struct packed {
         node_id_t src_id;
         logic is_write;
+        // Global writes occupy an inflight slot to keep the shared OBI response
+        // channel ordered, but their response is dropped instead of sent back.
+        logic is_global;
         obi_id_t obi_id;
     } out_req_inflight_meta_t;
 
@@ -153,6 +156,19 @@ module slink_prot_layer #(
     endfunction
 
 
+    function automatic payload_t make_global_payload(
+        node_id_t src_id,
+        a_chan_write_t awr
+    );
+        payload_t ret;
+        ret        = '0;
+        ret.src_id = src_id;
+        ret.hdr    = slink_pkg::TagWriteGlobal;
+        ret.obi_ch = awr;
+        return ret;
+    endfunction
+
+
 
     ///////////////////////////////
     //   TX ARBITER SIGNALS      //
@@ -193,7 +209,6 @@ module slink_prot_layer #(
     logic rsp_reorder_full;
     rsp_reorder_idx_t rsp_reorder_tail_idx, rsp_reorder_head_idx;
     obi_sbr_id_t [MaxOutstandingReqIn-1:0] rsp_reorder_saved_aid;
-    // logic [MaxOutstandingReqIn-1:0] rsp_reorder_pending;   // Not used
     logic rsp_reorder_alloc;
     obi_sbr_id_t rsp_reorder_alloc_aid;
     logic rsp_reorder_fill_valid;
@@ -207,9 +222,11 @@ module slink_prot_layer #(
     logic self_req_pend_fill_accept;
     logic self_req_pend_fill_d, self_req_pend_fill_q;
     rsp_reorder_idx_t self_req_pend_fill_idx_d, self_req_pend_fill_idx_q;
+    logic self_req_pend_err_d, self_req_pend_err_q;
 
     `FF(self_req_pend_fill_q, self_req_pend_fill_d, '0)
     `FF(self_req_pend_fill_idx_q, self_req_pend_fill_idx_d, '0)
+    `FF(self_req_pend_err_q, self_req_pend_err_d, '0)
 
     ////////////////////////////
     //   OBI CHANNEL SIGNALS  //
@@ -244,12 +261,17 @@ module slink_prot_layer #(
     logic [TxFifoCntrDepth-1:0]         tx_fifo_free_slots;
 
     logic rx_has_transit, rx_has_incoming_a;
+    logic rx_has_incoming_global, rx_has_global_loop;
+    logic rx_pass_through_avbl;
 
     logic obi_in_self_req_avbl, obi_in_tx_req_avbl;
     logic obi_out_req_commit, obi_in_gnt_commit;
 
-    assign rx_has_incoming_a = rx_meta.rx_type == slink_pkg::RxIncomingA;
-    assign rx_has_transit    = (rx_meta.rx_type == slink_pkg::RxTransit);
+    assign rx_has_incoming_a      = rx_meta.rx_type == slink_pkg::RxIncomingA;
+    assign rx_has_transit         = (rx_meta.rx_type == slink_pkg::RxTransit);
+    assign rx_has_incoming_global = rx_meta.rx_type == slink_pkg::RxIncomingGlobal;
+    assign rx_has_global_loop     = rx_meta.rx_type == slink_pkg::RxGlobalLoop;
+    assign rx_pass_through_avbl   = rx_has_transit || rx_has_incoming_global;
 
     assign obi_in_addr_to_nid = get_node_id_from_addr(obi_in_req_i.a.addr);
     
@@ -411,6 +433,11 @@ module slink_prot_layer #(
                     else                                     rx_meta.rx_type = slink_pkg::RxTransit;
                     rx_meta.is_write = (payload_in.hdr == slink_pkg::TagRWrite);
                 end
+                slink_pkg::TagWriteGlobal: begin
+                    if      (payload_in.src_id == node_id_i) rx_meta.rx_type = slink_pkg::RxGlobalLoop;
+                    else                                     rx_meta.rx_type = slink_pkg::RxIncomingGlobal;
+                    rx_meta.is_write = (payload_in.hdr == slink_pkg::TagWriteGlobal);
+                end
                 default: rx_meta.rx_type = slink_pkg::RxError;
             endcase
         end
@@ -426,7 +453,7 @@ module slink_prot_layer #(
         rsp_reorder_head_ready = 1'b0;
 
         if (obi_in_req_i.req && !rsp_reorder_full) begin
-            if (obi_in_addr_to_nid == node_id_i) begin
+            if (obi_in_addr_to_nid == node_id_i || (obi_in_addr_to_nid == global_addr_i && obi_in_req_i.a.we == 1'b0)) begin
                 if (!self_req_pend_fill_q) begin
                     obi_in_self_req_avbl = 1'b1;
                 end
@@ -465,6 +492,14 @@ module slink_prot_layer #(
                 obi_out_req_o.a.a_optional = a_chan_read_optional_in;
                 obi_out_req_o.a.be         = a_chan_read_be_in;
             end
+            if (obi_out_req_commit) obi_out_req_o.req = 1'b1;
+        end else if (rx_has_incoming_global) begin
+            obi_out_req_o.a.addr       = get_local_addr(a_chan_write_in.addr);
+            obi_out_req_o.a.aid        = obi_mgr_id_t'(a_chan_write_in.aid);
+            obi_out_req_o.a.wdata      = a_chan_write_in.wdata;
+            obi_out_req_o.a.we         = 1'b1;
+            obi_out_req_o.a.a_optional = a_chan_write_optional_in;
+            obi_out_req_o.a.be         = a_chan_write_be_in;
             if (obi_out_req_commit) obi_out_req_o.req = 1'b1;
         end
     end
@@ -541,8 +576,8 @@ module slink_prot_layer #(
                     rsp_reorder_fill_valid    = 1'b1;
                     rsp_reorder_fill_idx      = self_req_pend_fill_idx_q;
                     rsp_reorder_fill_data     = obi_r_chan_pack(
-                        '0, rsp_reorder_saved_aid[self_req_pend_fill_idx_q], 
-                        1'b1, '0
+                        '0, rsp_reorder_saved_aid[self_req_pend_fill_idx_q],
+                        self_req_pend_err_q, '0
                     );
                 end
             end
@@ -554,29 +589,33 @@ module slink_prot_layer #(
         tx_meta = '0;
         tx_meta.tx_type = slink_pkg::TxNone;
 
-        if (obi_out_rsp_i.rvalid && !out_req_inflight_fifo_empty) begin
-            // Prio 1: outgoing R response must always win (since no handshake)
+        if (obi_out_rsp_i.rvalid && !out_req_inflight_fifo_empty &&
+                !out_req_inflight_fifo_data_out.is_global) begin
+            // Prio 1: outgoing R response must always win (since no handshake).
+            // A global write's response is dropped (drained in the commiter), so it
+            // never produces a TxOutgoingR and frees the TX slot for other traffic.
             tx_meta.tx_type   = slink_pkg::TxOutgoingR;
             tx_meta.is_write = out_req_inflight_fifo_data_out.is_write;
             tx_meta.dst_id   = out_req_inflight_fifo_data_out.src_id;
 
         end else if (can_enqueue_tx) begin
-            // Prio 2: round-robin between Host A request and transit
-            unique case ({obi_in_tx_req_avbl, rx_has_transit})
+            // Prio 2: round-robin between Host A request and ring pass-through
+            // (transit or incoming-global forward).
+            unique case ({obi_in_tx_req_avbl, rx_pass_through_avbl})
                 2'b01: begin
-                    tx_meta.tx_type = slink_pkg::TxTransit;
+                    tx_meta.tx_type = rx_has_transit ? slink_pkg::TxTransit : slink_pkg::TxForwardGlobal;
                 end
                 2'b10: begin
-                    tx_meta.tx_type  = slink_pkg::TxOutgoingA;
+                    tx_meta.tx_type  = obi_in_addr_to_nid == global_addr_i ? slink_pkg::TxOutgoingGlobal : slink_pkg::TxOutgoingA;
                     tx_meta.is_write = obi_in_req_i.a.we;
                     tx_meta.dst_id   = obi_in_addr_to_nid;
                     tx_meta.aid      = obi_in_req_i.a.aid;
                 end
                 2'b11: begin
                     if (rr_tx_out_arb_q) begin
-                        tx_meta.tx_type  = slink_pkg::TxTransit;
+                        tx_meta.tx_type  = rx_has_transit ? slink_pkg::TxTransit : slink_pkg::TxForwardGlobal;
                     end else begin
-                        tx_meta.tx_type  = slink_pkg::TxOutgoingA;
+                        tx_meta.tx_type  = obi_in_addr_to_nid == global_addr_i ? slink_pkg::TxOutgoingGlobal : slink_pkg::TxOutgoingA;
                         tx_meta.is_write = obi_in_req_i.a.we;
                         tx_meta.dst_id   = obi_in_addr_to_nid;
                         tx_meta.aid      = obi_in_req_i.a.aid;
@@ -604,7 +643,12 @@ module slink_prot_layer #(
                     a_chan_write_out, a_chan_read_out
                 );
             end
+            slink_pkg::TxOutgoingGlobal: begin
+                payload_out = make_global_payload(node_id_i, a_chan_write_out);
+            end
+            slink_pkg::TxForwardGlobal,
             slink_pkg::TxTransit: begin
+                // Forward the received payload onward unchanged.
                 payload_out = payload_in;
             end
             default: ;
@@ -618,16 +662,28 @@ module slink_prot_layer #(
         unique case (payload_in.hdr)
             slink_pkg::TagAWrite: begin
                 out_req_inflight_fifo_data_in = '{
-                    src_id:   payload_in.src_id,
-                    is_write: 1'b1,
-                    obi_id:   a_chan_write_in.aid
+                    src_id:    payload_in.src_id,
+                    is_write:  1'b1,
+                    is_global: 1'b0,
+                    obi_id:    a_chan_write_in.aid
                 };
             end
             slink_pkg::TagARead: begin
                 out_req_inflight_fifo_data_in = '{
-                    src_id:   payload_in.src_id,
-                    is_write: 1'b0,
-                    obi_id:   a_chan_read_in.aid
+                    src_id:    payload_in.src_id,
+                    is_write:  1'b0,
+                    is_global: 1'b0,
+                    obi_id:    a_chan_read_in.aid
+                };
+            end
+            slink_pkg::TagWriteGlobal: begin
+                // Tracked only to keep the OBI response channel ordered; the
+                // response itself is dropped (see commiter), so src_id is unused.
+                out_req_inflight_fifo_data_in = '{
+                    src_id:    payload_in.src_id,
+                    is_write:  1'b1,
+                    is_global: 1'b1,
+                    obi_id:    a_chan_write_in.aid
                 };
             end
             default: begin
@@ -655,6 +711,7 @@ module slink_prot_layer #(
 
         self_req_pend_fill_d     = self_req_pend_fill_q;
         self_req_pend_fill_idx_d = self_req_pend_fill_idx_q;
+        self_req_pend_err_d      = self_req_pend_err_q;
 
         rr_tx_out_arb_d = rr_tx_out_arb_q;
 
@@ -682,6 +739,12 @@ module slink_prot_layer #(
                 error_looped_rsp_o   = 1'b1; // Set error flag in register
                 axis_in_rsp_o.tready = 1'b1; // Consume and discard
             end
+            slink_pkg::RxGlobalLoop: begin
+                // A global write made it all the way around back to its originator.
+                // The originator already responded to its host when injecting the
+                // broadcast, so just consume and discard to stop it from looping.
+                axis_in_rsp_o.tready = 1'b1;
+            end
             slink_pkg::RxError: begin
                 // Consume and discard (not a payload, should never happen)
                 axis_in_rsp_o.tready = 1'b1;
@@ -696,6 +759,7 @@ module slink_prot_layer #(
             rsp_reorder_alloc_aid    = obi_in_req_i.a.aid;
             self_req_pend_fill_d     = 1'b1;
             self_req_pend_fill_idx_d = rsp_reorder_tail_idx;
+            self_req_pend_err_d      = 1'b1; // Self/global-read can't be served -> error rsp
 
         end else if (self_req_pend_fill_accept && rsp_reorder_fill_ready) begin
             self_req_pend_fill_d     = 1'b0;
@@ -716,6 +780,30 @@ module slink_prot_layer #(
                     rsp_reorder_alloc_aid = tx_meta.aid;
                     rr_tx_out_arb_d       = ~rr_tx_out_arb_q; // Update RR on commit
                 end
+                slink_pkg::TxOutgoingGlobal: begin
+    
+                    if (!self_req_pend_fill_q) begin
+                        tx_fifo_valid_in      = 1'b1;
+                        obi_in_gnt_commit     = 1'b1;
+                        rsp_reorder_alloc        = 1'b1;
+                        rsp_reorder_alloc_aid    = tx_meta.aid;
+                        self_req_pend_fill_d     = 1'b1;
+                        self_req_pend_fill_idx_d = rsp_reorder_tail_idx;
+                        self_req_pend_err_d      = 1'b0;
+                        rr_tx_out_arb_d          = ~rr_tx_out_arb_q; // Update RR on commit
+                    end
+                end
+                slink_pkg::TxForwardGlobal: begin
+                    if (!out_req_inflight_fifo_full) begin
+                        obi_out_req_commit = 1'b1;
+                        if (obi_out_rsp_i.gnt) begin
+                            tx_fifo_valid_in           = 1'b1;
+                            axis_in_rsp_o.tready       = 1'b1;
+                            out_req_inflight_fifo_push = 1'b1;
+                            rr_tx_out_arb_d            = ~rr_tx_out_arb_q; // Update RR on commit
+                        end
+                    end
+                end
                 slink_pkg::TxTransit: begin
                     tx_fifo_valid_in     = 1'b1;
                     axis_in_rsp_o.tready = 1'b1;
@@ -723,6 +811,12 @@ module slink_prot_layer #(
                 end
                 default: ;
             endcase
+        end
+
+
+        if (obi_out_rsp_i.rvalid && !out_req_inflight_fifo_empty &&
+                out_req_inflight_fifo_data_out.is_global) begin
+            out_req_inflight_fifo_pop = 1'b1;
         end
     end
 
@@ -733,8 +827,11 @@ module slink_prot_layer #(
     `ASSERT(AxisStable, axis_out_req_o.tvalid & !axis_out_rsp_i.tready |=> $stable(axis_out_req_o.t))
     `ASSERT(AxisHandshake, axis_out_req_o.tvalid & !axis_out_rsp_i.tready |=> axis_out_req_o.tvalid)
 
-    `ASSERT(TxOutRFIFOFull, obi_out_rsp_i.rvalid |-> !out_req_inflight_fifo_empty && tx_fifo_ready_in)
-    `ASSERT(GntCommitMutex, !(obi_in_self_req_avbl && tx_meta.tx_type == slink_pkg::TxOutgoingA))
+    `ASSERT(TxOutRFIFOTracked, obi_out_rsp_i.rvalid |-> !out_req_inflight_fifo_empty)
+    `ASSERT(TxOutRFIFOFull, (obi_out_rsp_i.rvalid && !out_req_inflight_fifo_data_out.is_global)
+                            |-> !out_req_inflight_fifo_empty && tx_fifo_ready_in)
+    `ASSERT(GntCommitMutex, !(obi_in_self_req_avbl && (tx_meta.tx_type == slink_pkg::TxOutgoingA ||
+                                                       tx_meta.tx_type == slink_pkg::TxOutgoingGlobal)))
 
     `ASSERT_INIT(TxFifoDeeperThanInflight, TxFifoDepth > MaxInflightReqOut)
     `ASSERT_INIT(AddrWidthGreaterThanNodeId, slink_obi_cfg.AddrWidth > NodeIdWidth)
